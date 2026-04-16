@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Agenda Prof.",
+    "slug": "agenda-prof",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.agendaprof.app"
+    }
+  }
+}
