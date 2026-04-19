@@ -2,12 +2,12 @@
   "expo": {
     "name": "Agenda Prof",
     "slug": "agenda-prof-v2",
-    "version": "1.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/icon.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#08111F"
     },
@@ -15,7 +15,7 @@
       "**/*"
     ],
     "android": {
-      "package": "com.agendaprof.app",
+      "package": "com.war.agendaprof",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#08111F"
