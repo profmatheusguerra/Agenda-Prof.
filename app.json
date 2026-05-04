@@ -2,14 +2,14 @@
   "expo": {
     "name": "Agenda Prof",
     "slug": "agenda-prof-v2",
-    "version": "1.2.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F4F7FB"
+      "backgroundColor": "#F3F6FB"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -18,9 +18,9 @@
       "package": "com.agendaprof.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#F4F7FB"
+        "backgroundColor": "#F3F6FB"
       },
-      "versionCode": 3
+      "versionCode": 4
     }
   }
 }
