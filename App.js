@@ -11,20 +11,23 @@ import {
   Text,
   TextInput,
   View,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'agenda-prof-v2-data';
 
 const palette = {
-  bg: '#08111F',
-  bgSoft: '#0F1C2E',
-  card: '#13243B',
-  border: '#203656',
-  text: '#F5F7FB',
-  muted: '#9EB0C9',
-  primary: '#2D7FF9',
-  accent: '#FDBA2D',
+  bg: '#F4F7FB',
+  bgSoft: '#EAF2FB',
+  card: '#FFFFFF',
+  border: '#D8E3F0',
+  text: '#102544',
+  muted: '#64748B',
+  primary: '#2F66C5',
+  primaryDark: '#0C2D63',
+  accent: '#F5A623',
+  cyan: '#27B7D7',
   danger: '#E45C5C',
   success: '#34C38F',
   white: '#FFFFFF',
@@ -70,6 +73,18 @@ const longDate = (date) =>
   date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).replace(/^./, (s) => s.toUpperCase());
 const shortDate = (dateKey) => parseDateKey(dateKey).toLocaleDateString('pt-BR');
 const compareTime = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const calculateEndTime = (time) => {
+  const match = /^(\d{1,2}):(\d{2})$/.exec((time || '').trim());
+  if (!match) return '';
+  let hours = Number(match[1]);
+  let minutes = Number(match[2]);
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 23 || minutes > 59) return '';
+  minutes += 50;
+  hours += Math.floor(minutes / 60);
+  minutes %= 60;
+  hours %= 24;
+  return `${pad(hours)}:${pad(minutes)}`;
+};
 const startOfWeek = (date) => {
   const copy = new Date(date);
   const day = copy.getDay();
@@ -317,7 +332,7 @@ function App() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="dark-content" />
       <View style={styles.container}>
         <Header teacherName={data.profile.teacherName} />
 
@@ -399,7 +414,7 @@ function App() {
                   onChange={(value) => setLessonForm((prev) => ({ ...prev, weekday: value }))}
                 />
                 <View style={styles.rowGap}>
-                  <InputField label="Início" value={lessonForm.startTime} onChangeText={(text) => setLessonForm((prev) => ({ ...prev, startTime: text }))} placeholder="07:00" />
+                  <InputField label="Início" value={lessonForm.startTime} onChangeText={(text) => setLessonForm((prev) => ({ ...prev, startTime: text, endTime: calculateEndTime(text) || prev.endTime }))} placeholder="07:00" />
                   <InputField label="Fim" value={lessonForm.endTime} onChangeText={(text) => setLessonForm((prev) => ({ ...prev, endTime: text }))} placeholder="07:50" />
                 </View>
                 <PrimaryButton title="Salvar aula" onPress={saveLesson} />
@@ -488,11 +503,15 @@ function Header({ teacherName }) {
     <View style={styles.header}>
       <View style={styles.logoWrap}>
         <View style={styles.logoBadge}>
-          <Text style={styles.logoBadgeText}>AP</Text>
+          <Image
+            source={require('./assets/icon.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </View>
-        <View>
+        <View style={styles.logoTextWrap}>
           <Text style={styles.brand}>Agenda Prof</Text>
-          <Text style={styles.brandSub}>{teacherName ? `Olá, ${teacherName}` : 'Organize aulas, tarefas e compromissos'}</Text>
+          <Text style={styles.brandSub}>{teacherName ? `Olá, ${teacherName}` : 'Organize • Planeje • Conquiste'}</Text>
         </View>
       </View>
     </View>
@@ -642,40 +661,67 @@ function ManagementModal(props) {
   return (
     <Modal visible={!!type} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
+        <View style={[styles.modalCard, styles.managementModalCard]}>
           {type === 'school' && (
-            <View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalTitle}>Nova escola</Text>
-              <InputField label="Nome da escola" value={schoolForm.name} onChangeText={(text) => setSchoolForm((prev) => ({ ...prev, name: text }))} placeholder="Ex.: Escola Estadual Central" />
+              <Text style={styles.modalSubtitle}>Cadastre a escola e escolha uma cor para identificá-la na agenda.</Text>
+              <InputField
+                label="Nome da escola"
+                value={schoolForm.name}
+                onChangeText={(text) => setSchoolForm((prev) => ({ ...prev, name: text }))}
+                placeholder="Ex.: Escola Estadual Central"
+                inputStyle={styles.managementInput}
+              />
               <Text style={styles.inputLabel}>Cor de identificação</Text>
-              <View style={styles.colorRow}>
+              <View style={styles.colorRowLarge}>
                 {SCHOOL_COLORS.map((color) => (
                   <Pressable
                     key={color}
                     onPress={() => setSchoolForm((prev) => ({ ...prev, color }))}
-                    style={[styles.colorBubble, { backgroundColor: color }, schoolForm.color === color && styles.colorBubbleSelected]}
+                    style={[styles.colorBubbleLarge, { backgroundColor: color }, schoolForm.color === color && styles.colorBubbleSelectedLarge]}
                   />
                 ))}
               </View>
-              <PrimaryButton title="Salvar escola" onPress={saveSchool} />
-              <SecondaryButton title="Cancelar" onPress={onClose} />
-            </View>
+              <View style={styles.managementButtonsWrap}>
+                <PrimaryButton title="Salvar escola" onPress={saveSchool} />
+                <SecondaryButton title="Cancelar" onPress={onClose} />
+              </View>
+            </ScrollView>
           )}
           {type === 'class' && (
-            <View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalTitle}>Nova turma</Text>
-              <InputField label="Nome da turma" value={classForm.name} onChangeText={(text) => setClassForm({ name: text })} placeholder="Ex.: 1º ano 1" />
-              <PrimaryButton title="Salvar turma" onPress={saveClass} />
-              <SecondaryButton title="Cancelar" onPress={onClose} />
-            </View>
+              <Text style={styles.modalSubtitle}>Exemplo: 1º ano 1, 2º ano A, 3ª série.</Text>
+              <InputField
+                label="Nome da turma"
+                value={classForm.name}
+                onChangeText={(text) => setClassForm({ name: text })}
+                placeholder="Ex.: 1º ano 1"
+                inputStyle={styles.managementInput}
+              />
+              <View style={styles.managementButtonsWrap}>
+                <PrimaryButton title="Salvar turma" onPress={saveClass} />
+                <SecondaryButton title="Cancelar" onPress={onClose} />
+              </View>
+            </ScrollView>
           )}
           {type === 'subject' && (
-            <View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalTitle}>Nova disciplina</Text>
-              <InputField label="Nome da disciplina" value={subjectForm.name} onChangeText={(text) => setSubjectForm({ name: text })} placeholder="Ex.: História" />
-              <PrimaryButton title="Salvar disciplina" onPress={saveSubject} />
-              <SecondaryButton title="Cancelar" onPress={onClose} />
-            </View>
+              <Text style={styles.modalSubtitle}>Cadastre disciplinas para reutilizar na criação das aulas.</Text>
+              <InputField
+                label="Nome da disciplina"
+                value={subjectForm.name}
+                onChangeText={(text) => setSubjectForm({ name: text })}
+                placeholder="Ex.: História"
+                inputStyle={styles.managementInput}
+              />
+              <View style={styles.managementButtonsWrap}>
+                <PrimaryButton title="Salvar disciplina" onPress={saveSubject} />
+                <SecondaryButton title="Cancelar" onPress={onClose} />
+              </View>
+            </ScrollView>
           )}
         </View>
       </View>
@@ -816,7 +862,7 @@ function SwitchRow({ label, value, onValueChange }) {
   );
 }
 
-function InputField({ label, multiline = false, ...props }) {
+function InputField({ label, multiline = false, inputStyle, ...props }) {
   return (
     <View style={styles.inputWrapFlex}>
       <Text style={styles.inputLabel}>{label}</Text>
@@ -824,7 +870,7 @@ function InputField({ label, multiline = false, ...props }) {
         {...props}
         placeholderTextColor={palette.muted}
         multiline={multiline}
-        style={[styles.input, multiline && styles.inputMultiline]}
+        style={[styles.input, multiline && styles.inputMultiline, inputStyle]}
       />
     </View>
   );
@@ -855,60 +901,98 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: palette.bg },
   container: { flex: 1, backgroundColor: palette.bg },
   body: { flex: 1 },
-  header: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 10 },
+  header: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 10, backgroundColor: palette.bg },
   logoWrap: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   logoBadge: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
-    backgroundColor: palette.accent,
+    width: 62,
+    height: 62,
+    borderRadius: 22,
+    backgroundColor: palette.white,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: palette.border,
+    shadowColor: '#0C2D63',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
     elevation: 4,
+    overflow: 'hidden',
   },
-  logoBadgeText: { color: palette.bg, fontSize: 22, fontWeight: '800' },
-  brand: { color: palette.text, fontSize: 24, fontWeight: '800' },
-  brandSub: { color: palette.muted, fontSize: 13, marginTop: 2 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 110 },
-  heroCard: { backgroundColor: palette.card, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: palette.border },
-  heroTitle: { color: palette.text, fontSize: 24, fontWeight: '800' },
-  heroSubtitle: { color: palette.accent, fontSize: 14, marginTop: 4, fontWeight: '600' },
+  logoImage: { width: 56, height: 56 },
+  logoTextWrap: { flex: 1 },
+  logoBadgeText: { color: palette.primaryDark, fontSize: 22, fontWeight: '800' },
+  brand: { color: palette.primaryDark, fontSize: 24, fontWeight: '800' },
+  brandSub: { color: palette.cyan, fontSize: 13, marginTop: 2, fontWeight: '700' },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 112 },
+  heroCard: {
+    backgroundColor: palette.white,
+    borderRadius: 24,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: palette.border,
+    shadowColor: '#0C2D63',
+    shadowOpacity: 0.07,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  heroTitle: { color: palette.primaryDark, fontSize: 26, fontWeight: '800' },
+  heroSubtitle: { color: palette.accent, fontSize: 14, marginTop: 4, fontWeight: '800' },
   heroParagraph: { color: palette.muted, fontSize: 14, marginTop: 10, lineHeight: 20 },
   statsRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
-  statCard: { flex: 1, backgroundColor: palette.bgSoft, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: palette.border },
-  statValue: { color: palette.text, fontSize: 22, fontWeight: '800' },
+  statCard: {
+    flex: 1,
+    backgroundColor: palette.white,
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  statValue: { color: palette.primaryDark, fontSize: 22, fontWeight: '800' },
   statLabel: { color: palette.muted, fontSize: 12, marginTop: 4 },
   sectionTitleWrap: { marginTop: 18, marginBottom: 10 },
-  sectionTitle: { color: palette.text, fontSize: 18, fontWeight: '700' },
+  sectionTitle: { color: palette.primaryDark, fontSize: 18, fontWeight: '800' },
   sectionSubtitle: { color: palette.muted, fontSize: 13, marginTop: 2 },
-  eventCard: { flexDirection: 'row', backgroundColor: palette.card, borderRadius: 20, marginBottom: 10, overflow: 'hidden', borderWidth: 1, borderColor: palette.border },
+  eventCard: {
+    flexDirection: 'row',
+    backgroundColor: palette.white,
+    borderRadius: 20,
+    marginBottom: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: palette.border,
+    shadowColor: '#0C2D63',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
+  },
   eventColor: { width: 7 },
   eventContent: { flex: 1, padding: 14 },
   eventTopRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  eventTitle: { color: palette.text, fontSize: 15, fontWeight: '700', flex: 1 },
-  eventTime: { color: palette.accent, fontSize: 13, fontWeight: '700' },
+  eventTitle: { color: palette.primaryDark, fontSize: 15, fontWeight: '800', flex: 1 },
+  eventTime: { color: palette.accent, fontSize: 13, fontWeight: '800' },
   eventSubtitle: { color: palette.muted, fontSize: 13, marginTop: 6 },
-  eventDate: { color: palette.text, fontSize: 12, marginTop: 8 },
+  eventDate: { color: palette.primaryDark, fontSize: 12, marginTop: 8 },
   eventDescription: { color: palette.muted, fontSize: 12, marginTop: 8, lineHeight: 18 },
   tabsWrap: {
     position: 'absolute',
     left: 12,
     right: 12,
     bottom: 14,
-    backgroundColor: '#102238',
+    backgroundColor: palette.white,
     borderRadius: 24,
     flexDirection: 'row',
     padding: 8,
     borderWidth: 1,
     borderColor: palette.border,
     justifyContent: 'space-between',
+    shadowColor: '#0C2D63',
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 8,
   },
   tabItem: { flex: 1, minHeight: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingHorizontal: 4 },
   tabItemActive: { backgroundColor: palette.primary },
-  tabText: { color: palette.muted, fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  tabText: { color: palette.muted, fontSize: 11, fontWeight: '800', textAlign: 'center' },
   tabTextActive: { color: palette.white },
   fab: {
     position: 'absolute',
@@ -916,29 +1000,44 @@ const styles = StyleSheet.create({
     bottom: 96,
     width: 62,
     height: 62,
-    borderRadius: 22,
+    borderRadius: 31,
     backgroundColor: palette.accent,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
+    shadowColor: '#B87900',
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
   },
-  fabIcon: { color: palette.bg, fontSize: 32, fontWeight: '800', marginTop: -2 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.56)', justifyContent: 'center', padding: 16 },
-  modalCard: { backgroundColor: palette.bgSoft, borderRadius: 24, padding: 18, maxHeight: '88%', borderWidth: 1, borderColor: palette.border },
-  modalTitle: { color: palette.text, fontSize: 22, fontWeight: '800' },
+  fabIcon: { color: palette.primaryDark, fontSize: 32, fontWeight: '900', marginTop: -2 },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(15, 35, 62, 0.38)', justifyContent: 'center', padding: 16 },
+  modalCard: {
+    backgroundColor: palette.white,
+    borderRadius: 24,
+    padding: 18,
+    maxHeight: '88%',
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  managementModalCard: {
+    width: '100%',
+    maxHeight: '82%',
+    padding: 20,
+  },
+  modalTitle: { color: palette.primaryDark, fontSize: 22, fontWeight: '900' },
   modalSubtitle: { color: palette.muted, fontSize: 13, marginTop: 4, marginBottom: 16, lineHeight: 18 },
-  actionButton: { backgroundColor: palette.card, borderRadius: 18, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: palette.border },
-  actionTitle: { color: palette.text, fontSize: 16, fontWeight: '700' },
+  actionButton: { backgroundColor: palette.bgSoft, borderRadius: 18, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: palette.border },
+  actionTitle: { color: palette.primaryDark, fontSize: 16, fontWeight: '800' },
   actionSubtitle: { color: palette.muted, fontSize: 13, marginTop: 6 },
   primaryButton: { backgroundColor: palette.primary, paddingVertical: 15, borderRadius: 18, alignItems: 'center', marginTop: 12 },
-  primaryButtonText: { color: palette.white, fontSize: 15, fontWeight: '800' },
-  secondaryButton: { backgroundColor: 'transparent', paddingVertical: 14, borderRadius: 18, alignItems: 'center', marginTop: 10, borderWidth: 1, borderColor: palette.border },
-  secondaryButtonText: { color: palette.text, fontSize: 14, fontWeight: '700' },
+  primaryButtonText: { color: palette.white, fontSize: 15, fontWeight: '900' },
+  secondaryButton: { backgroundColor: palette.white, paddingVertical: 14, borderRadius: 18, alignItems: 'center', marginTop: 10, borderWidth: 1, borderColor: palette.border },
+  secondaryButtonText: { color: palette.primaryDark, fontSize: 14, fontWeight: '800' },
   inputWrapFlex: { flex: 1, marginBottom: 12 },
-  inputLabel: { color: palette.text, fontSize: 13, fontWeight: '700', marginBottom: 7 },
+  inputLabel: { color: palette.primaryDark, fontSize: 13, fontWeight: '800', marginBottom: 7 },
   input: {
-    backgroundColor: palette.card,
-    color: palette.text,
+    backgroundColor: palette.white,
+    color: palette.primaryDark,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: palette.border,
@@ -946,55 +1045,61 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     fontSize: 14,
   },
+  managementInput: { minHeight: 58, fontSize: 16, paddingVertical: 16 },
   inputMultiline: { minHeight: 88, textAlignVertical: 'top' },
   rowGap: { flexDirection: 'row', gap: 10 },
-  calendarField: { backgroundColor: palette.card, borderRadius: 16, borderWidth: 1, borderColor: palette.border, padding: 14, marginBottom: 12 },
-  calendarFieldText: { color: palette.text, fontSize: 15, fontWeight: '700' },
+  calendarField: { backgroundColor: palette.white, borderRadius: 16, borderWidth: 1, borderColor: palette.border, padding: 14, marginBottom: 12 },
+  calendarFieldText: { color: palette.primaryDark, fontSize: 15, fontWeight: '800' },
   calendarFieldHint: { color: palette.muted, fontSize: 12, marginTop: 6 },
-  calendarCard: { backgroundColor: palette.card, borderRadius: 24, padding: 14, borderWidth: 1, borderColor: palette.border },
+  calendarCard: { backgroundColor: palette.white, borderRadius: 24, padding: 14, borderWidth: 1, borderColor: palette.border },
   calendarHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  calendarTitle: { color: palette.text, fontSize: 16, fontWeight: '800' },
+  calendarTitle: { color: palette.primaryDark, fontSize: 16, fontWeight: '900' },
   monthNav: { width: 40, height: 40, borderRadius: 14, backgroundColor: palette.bgSoft, alignItems: 'center', justifyContent: 'center' },
-  monthNavText: { color: palette.text, fontSize: 22, fontWeight: '800' },
+  monthNavText: { color: palette.primaryDark, fontSize: 22, fontWeight: '900' },
   weekHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  weekHeaderText: { width: '14.285%', textAlign: 'center', color: palette.muted, fontSize: 12, fontWeight: '700' },
+  weekHeaderText: { width: '14.285%', textAlign: 'center', color: palette.muted, fontSize: 12, fontWeight: '800' },
   calendarGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   dayCell: { width: '14.285%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 16 },
   dayCellSelected: { backgroundColor: palette.primary },
   dayCellMuted: { opacity: 0.45 },
-  dayCellText: { color: palette.text, fontSize: 13, fontWeight: '700' },
+  dayCellText: { color: palette.primaryDark, fontSize: 13, fontWeight: '800' },
   dayCellTextSelected: { color: palette.white },
   dayDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: palette.accent, marginTop: 4 },
   dayDotSpacer: { width: 6, height: 6, marginTop: 4 },
-  emptyCard: { backgroundColor: palette.card, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: palette.border },
+  emptyCard: { backgroundColor: palette.white, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: palette.border },
   emptyText: { color: palette.muted, fontSize: 14 },
   managementGrid: { gap: 12 },
-  managementCard: { backgroundColor: palette.card, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: palette.border },
-  managementTitle: { color: palette.text, fontSize: 16, fontWeight: '700' },
+  managementCard: { backgroundColor: palette.white, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: palette.border },
+  managementTitle: { color: palette.primaryDark, fontSize: 16, fontWeight: '800' },
   managementSubtitle: { color: palette.muted, fontSize: 13, marginTop: 4 },
   miniButton: { alignSelf: 'flex-start', backgroundColor: palette.primary, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, marginTop: 12 },
-  miniButtonText: { color: palette.white, fontWeight: '700', fontSize: 13 },
-  card: { backgroundColor: palette.card, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: palette.border, marginBottom: 12 },
-  infoCard: { backgroundColor: '#122946', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: palette.border },
-  infoTitle: { color: palette.text, fontWeight: '700', fontSize: 15 },
+  miniButtonText: { color: palette.white, fontWeight: '800', fontSize: 13 },
+  card: { backgroundColor: palette.white, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: palette.border, marginBottom: 12 },
+  infoCard: { backgroundColor: palette.white, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: palette.border },
+  infoTitle: { color: palette.primaryDark, fontWeight: '800', fontSize: 15 },
   infoText: { color: palette.muted, fontSize: 13, marginTop: 8, lineHeight: 19 },
-  summaryTitle: { color: palette.text, fontWeight: '700', fontSize: 15, marginBottom: 10 },
+  summaryTitle: { color: palette.primaryDark, fontWeight: '800', fontSize: 15, marginBottom: 10 },
   summaryEmpty: { color: palette.muted, fontSize: 13 },
   summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   summaryBullet: { width: 10, height: 10, borderRadius: 5, backgroundColor: palette.primary },
-  summaryItem: { color: palette.text, fontSize: 14 },
+  summaryItem: { color: palette.primaryDark, fontSize: 14 },
   colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 8 },
+  colorRowLarge: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 2, marginBottom: 12 },
   colorBubble: { width: 36, height: 36, borderRadius: 18 },
-  colorBubbleSelected: { borderWidth: 3, borderColor: palette.white },
+  colorBubbleLarge: { width: 50, height: 50, borderRadius: 25 },
+  colorBubbleSelected: { borderWidth: 3, borderColor: palette.primaryDark },
+  colorBubbleSelectedLarge: { borderWidth: 4, borderColor: palette.primaryDark, transform: [{ scale: 1.06 }] },
+  managementButtonsWrap: { marginTop: 8 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 12 },
-  switchLabel: { color: palette.text, fontSize: 14, flex: 1, paddingRight: 10 },
-  selectWrap: { backgroundColor: palette.card, borderRadius: 16, borderWidth: 1, borderColor: palette.border, padding: 10, gap: 8 },
-  selectChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#0C1830', borderRadius: 14 },
+  switchLabel: { color: palette.primaryDark, fontSize: 14, flex: 1, paddingRight: 10 },
+  selectWrap: { backgroundColor: palette.white, borderRadius: 16, borderWidth: 1, borderColor: palette.border, padding: 10, gap: 8 },
+  selectChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: palette.bgSoft, borderRadius: 14 },
   selectChipActive: { backgroundColor: palette.primary },
-  selectChipText: { color: palette.text, fontSize: 13, fontWeight: '600' },
+  selectChipText: { color: palette.primaryDark, fontSize: 13, fontWeight: '700' },
   selectChipTextActive: { color: palette.white },
   selectColorDot: { width: 10, height: 10, borderRadius: 5 },
   selectPlaceholder: { color: palette.muted, fontSize: 12, marginTop: 2 },
 });
 
 export default App;
+
