@@ -47,6 +47,11 @@ const WEEKDAY_OPTIONS = [
   { label: 'Domingo', value: 0 },
 ];
 
+const LESSON_MODE_OPTIONS = [
+  { label: 'Aula recorrente', value: 'recurring' },
+  { label: 'Aula isolada', value: 'single' },
+];
+
 const initialData = {
   profile: {
     teacherName: '',
@@ -120,6 +125,17 @@ function isRecurringOnDate(item, dateKey) {
 
 function isLessonOnDate(lesson, dateKey) {
   const target = parseDateKey(dateKey);
+  const lessonDate = lesson.date || null;
+  const lessonMode = lesson.mode || 'recurring';
+
+  if (lessonMode === 'single') {
+    return lessonDate === dateKey;
+  }
+
+  if (lessonDate && target < parseDateKey(lessonDate)) {
+    return false;
+  }
+
   return target.getDay() === lesson.weekday;
 }
 
@@ -152,7 +168,7 @@ function App() {
   const [modalMode, setModalMode] = useState(null);
   const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
   const [calendarTargetField, setCalendarTargetField] = useState('date');
-  const [lessonForm, setLessonForm] = useState({ schoolId: '', classId: '', subjectId: '', weekday: 1, startTime: '07:00', endTime: '07:50' });
+  const [lessonForm, setLessonForm] = useState({ schoolId: '', classId: '', subjectId: '', mode: 'recurring', date: toDateKey(new Date()), weekday: 1, startTime: '07:00', endTime: '07:50' });
   const [commitmentForm, setCommitmentForm] = useState({ type: COMMITMENT_TYPES[0], title: '', description: '', schoolId: '', date: toDateKey(new Date()), time: '08:00', recurrence: 'Não repetir' });
   const [managementModal, setManagementModal] = useState(null);
   const [schoolForm, setSchoolForm] = useState({ name: '', color: SCHOOL_COLORS[0] });
@@ -197,7 +213,7 @@ function App() {
             id: `${lesson.id}-${dateKey}`,
             originalId: lesson.id,
             eventType: 'aula',
-            title: subject?.name || 'Aula',
+            title: lesson.mode === 'single' ? `${subject?.name || 'Aula'} (isolada)` : subject?.name || 'Aula',
             subtitle: `${classItem?.name || 'Turma'} • ${school?.name || 'Escola'}`,
             date: dateKey,
             sortTime: lesson.startTime,
@@ -297,11 +313,15 @@ function App() {
       Alert.alert('Campos obrigatórios', 'Selecione escola, turma e disciplina.');
       return;
     }
+    if (!lessonForm.date) {
+      Alert.alert('Data obrigatória', 'Escolha a data inicial ou a data da aula isolada.');
+      return;
+    }
     setData((prev) => ({
       ...prev,
-      lessons: [...prev.lessons, { id: uid(), ...lessonForm }],
+      lessons: [...prev.lessons, { id: uid(), ...lessonForm, weekday: lessonForm.mode === 'single' ? parseDateKey(lessonForm.date).getDay() : lessonForm.weekday }],
     }));
-    setLessonForm({ schoolId: '', classId: '', subjectId: '', weekday: 1, startTime: '07:00', endTime: '07:50' });
+    setLessonForm({ schoolId: '', classId: '', subjectId: '', mode: 'recurring', date: toDateKey(new Date()), weekday: 1, startTime: '07:00', endTime: '07:50' });
     setModalMode(null);
     setModalOpen(false);
   };
@@ -385,7 +405,7 @@ function App() {
             {modalMode === 'lesson' && (
               <ScrollView showsVerticalScrollIndicator={false}>
                 <Text style={styles.modalTitle}>Nova aula</Text>
-                <Text style={styles.modalSubtitle}>As aulas se repetem semanalmente automaticamente.</Text>
+                <Text style={styles.modalSubtitle}>Cadastre aulas recorrentes ou uma aula isolada para uma data específica.</Text>
                 <SelectField
                   label="Escola"
                   placeholder="Selecione uma escola"
@@ -408,11 +428,30 @@ function App() {
                   onChange={(value) => setLessonForm((prev) => ({ ...prev, subjectId: value }))}
                 />
                 <SelectField
-                  label="Dia da semana"
-                  value={lessonForm.weekday}
-                  options={WEEKDAY_OPTIONS}
-                  onChange={(value) => setLessonForm((prev) => ({ ...prev, weekday: value }))}
+                  label="Tipo de aula"
+                  value={lessonForm.mode}
+                  options={LESSON_MODE_OPTIONS}
+                  onChange={(value) => setLessonForm((prev) => ({ ...prev, mode: value }))}
                 />
+                <Pressable
+                  style={styles.calendarField}
+                  onPress={() => {
+                    setCalendarTargetField('lessonDate');
+                    setCalendarPickerOpen(true);
+                  }}
+                >
+                  <Text style={styles.inputLabel}>{lessonForm.mode === 'single' ? 'Data da aula isolada' : 'Data inicial'}</Text>
+                  <Text style={styles.calendarFieldText}>{shortDate(lessonForm.date)}</Text>
+                  <Text style={styles.calendarFieldHint}>Toque para escolher no calendário</Text>
+                </Pressable>
+                {lessonForm.mode === 'recurring' && (
+                  <SelectField
+                    label="Dia da semana"
+                    value={lessonForm.weekday}
+                    options={WEEKDAY_OPTIONS}
+                    onChange={(value) => setLessonForm((prev) => ({ ...prev, weekday: value }))}
+                  />
+                )}
                 <View style={styles.rowGap}>
                   <InputField label="Início" value={lessonForm.startTime} onChangeText={(text) => setLessonForm((prev) => ({ ...prev, startTime: text, endTime: calculateEndTime(text) || prev.endTime }))} placeholder="07:00" />
                   <InputField label="Fim" value={lessonForm.endTime} onChangeText={(text) => setLessonForm((prev) => ({ ...prev, endTime: text }))} placeholder="07:50" />
@@ -444,7 +483,7 @@ function App() {
                 <Pressable
                   style={styles.calendarField}
                   onPress={() => {
-                    setCalendarTargetField('date');
+                    setCalendarTargetField('commitmentDate');
                     setCalendarPickerOpen(true);
                   }}
                 >
@@ -471,10 +510,16 @@ function App() {
 
       <CalendarPicker
         visible={calendarPickerOpen}
-        value={commitmentForm.date}
+        value={calendarTargetField === 'lessonDate' ? lessonForm.date : commitmentForm.date}
         onClose={() => setCalendarPickerOpen(false)}
         onSelect={(dateKey) => {
-          if (calendarTargetField === 'date') {
+          if (calendarTargetField === 'lessonDate') {
+            setLessonForm((prev) => ({
+              ...prev,
+              date: dateKey,
+              weekday: parseDateKey(dateKey).getDay(),
+            }));
+          } else {
             setCommitmentForm((prev) => ({ ...prev, date: dateKey }));
           }
           setCalendarPickerOpen(false);

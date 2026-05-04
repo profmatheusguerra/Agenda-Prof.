@@ -2,7 +2,7 @@
   "expo": {
     "name": "Agenda Prof",
     "slug": "agenda-prof-v2",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,7 +19,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#F4F7FB"
-      }
+      },
+      "versionCode": 3
     }
   }
 }
