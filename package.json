@@ -1,6 +1,6 @@
 {
   "name": "agenda-prof-v2",
-  "version": "2.4.0",
+  "version": "1.0.0",
   "private": true,
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
@@ -13,10 +13,13 @@
     "expo": "~51.0.28",
     "expo-status-bar": "~1.12.1",
     "react": "18.2.0",
-    "react-native": "0.74.5",
-    "expo-notifications": "~0.28.19"
+    "react-native": "0.74.5"
   },
   "devDependencies": {
     "babel-preset-expo": "~11.0.6"
-  }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }
