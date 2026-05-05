@@ -801,8 +801,8 @@ function SettingsTab({ profile, updateProfile }) {
         <SwitchRow label="Notificações locais (preparação)" value={profile.notifications} onValueChange={(value) => updateProfile({ notifications: value })} />
       </View>
       <View style={styles.infoCard}>
-        <Text style={styles.infoTitle}>Próximas evoluções sugeridas</Text>
-        <Text style={styles.infoText}>Login Google real, sincronização com Google Agenda e Google Drive podem ser adicionados depois.</Text>
+        <Text style={styles.infoTitle}>Versão 5.6 ativa</Text>
+        <Text style={styles.infoText}>Correções ativas: feriados marcados e bloqueados, eventos vencidos ocultos após 30 minutos, edição/exclusão por toque e fim do ano letivo.</Text>
       </View>
     </ScrollView>
   );
