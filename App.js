@@ -68,6 +68,7 @@ const initialData = {
     teacherName: '',
     compactMode: false,
     notifications: true,
+    schoolYearEnd: '',
   },
   schools: [],
   classes: [],
@@ -226,6 +227,22 @@ function isNationalHoliday(dateKey) {
   return getNationalHolidayMap(year)[dateKey] || null;
 }
 
+function isValidDateKey(dateKey) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '').trim())) return false;
+  const parsed = parseDateKey(dateKey);
+  return !Number.isNaN(parsed.getTime());
+}
+
+function isAfterSchoolYearEnd(dateKey, schoolYearEnd) {
+  const limit = String(schoolYearEnd || '').trim();
+  if (!isValidDateKey(limit)) return false;
+  return parseDateKey(dateKey) > parseDateKey(limit);
+}
+
+function schoolYearEndMessage(schoolYearEnd) {
+  return `A data escolhida ultrapassa o fim do ano letivo (${shortDate(schoolYearEnd)}).`;
+}
+
 function eventEndDate(event) {
   const time = event.timeLabel?.includes(' - ') ? event.timeLabel.split(' - ')[1] : event.sortTime || '00:00';
   const [hours = 0, minutes = 0] = String(time || '00:00').split(':').map(Number);
@@ -378,6 +395,7 @@ function App() {
     for (let cursor = new Date(start); cursor <= end; cursor = addDays(cursor, 1)) {
       const dateKey = toDateKey(cursor);
       if (isNationalHoliday(dateKey)) continue;
+      if (isAfterSchoolYearEnd(dateKey, data.profile?.schoolYearEnd)) continue;
 
       data.lessons.forEach((lesson) => {
         if (isLessonOnDate(lesson, dateKey)) {
@@ -516,6 +534,7 @@ function App() {
     const lessonDate = lessonForm.lessonType === 'single' ? lessonForm.date : lessonForm.startDate;
     const holidayName = isNationalHoliday(lessonDate);
     if (holidayName) return Alert.alert('Feriado nacional', `Não é possível cadastrar aula em ${shortDate(lessonDate)} (${holidayName}).`);
+    if (isAfterSchoolYearEnd(lessonDate, data.profile?.schoolYearEnd)) return Alert.alert('Fim do ano letivo', schoolYearEndMessage(data.profile.schoolYearEnd));
     const lessonToSave = {
       id: editingItem?.type === 'lesson' ? editingItem.id : uid(),
       ...lessonForm,
@@ -555,6 +574,7 @@ function App() {
     if (!commitmentForm.title.trim()) return Alert.alert('Campo obrigatório', 'Informe um título para o compromisso.');
     const holidayName = isNationalHoliday(commitmentForm.date);
     if (holidayName) return Alert.alert('Feriado nacional', `Não é possível cadastrar compromisso em ${shortDate(commitmentForm.date)} (${holidayName}).`);
+    if (isAfterSchoolYearEnd(commitmentForm.date, data.profile?.schoolYearEnd)) return Alert.alert('Fim do ano letivo', schoolYearEndMessage(data.profile.schoolYearEnd));
     const commitmentToSave = { id: editingItem?.type === 'commitment' ? editingItem.id : uid(), ...commitmentForm, title: commitmentForm.title.trim(), description: commitmentForm.description.trim() };
     setData((prev) => ({
       ...prev,
@@ -611,6 +631,7 @@ function App() {
     }
     const holidayName = isNationalHoliday(examForm.date);
     if (holidayName) return Alert.alert('Feriado nacional', `Não é possível cadastrar avaliação em ${shortDate(examForm.date)} (${holidayName}).`);
+    if (isAfterSchoolYearEnd(examForm.date, data.profile?.schoolYearEnd)) return Alert.alert('Fim do ano letivo', schoolYearEndMessage(data.profile.schoolYearEnd));
     const subject = findById(data.subjects, examForm.subjectId);
     const exam = {
       id: editingItem?.type === 'exam' ? editingItem.id : uid(),
@@ -964,12 +985,41 @@ function MonthCalendar({ monthCells, selectedDate, setSelectedDate, countByDay, 
           const hasEvent = countByDay[cell.key] > 0;
           const holidayName = isNationalHoliday(cell.key);
           return (
-            <Pressable key={cell.key} onPress={() => setSelectedDate(cell.key)} style={[styles.dayCell, holidayName && styles.dayCellHoliday, selected && styles.dayCellSelected, !cell.inMonth && styles.dayCellMuted]}>
-              <Text style={[styles.dayCellText, selected && styles.dayCellTextSelected]}>{parseDateKey(cell.key).getDate()}</Text>
-              {holidayName ? <View style={styles.holidayDot} /> : hasEvent ? <View style={[styles.dayDot, { backgroundColor: markerColor }]} /> : <View style={styles.dayDotSpacer} />} 
+            <Pressable
+              key={cell.key}
+              onPress={() => setSelectedDate(cell.key)}
+              style={[
+                styles.dayCell,
+                selected && styles.dayCellSelected,
+                holidayName && styles.dayCellHoliday,
+                selected && holidayName && styles.dayCellHolidaySelected,
+                !cell.inMonth && styles.dayCellMuted,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.dayCellText,
+                  selected && styles.dayCellTextSelected,
+                  holidayName && styles.dayCellHolidayText,
+                  selected && holidayName && styles.dayCellHolidayTextSelected,
+                ]}
+              >
+                {parseDateKey(cell.key).getDate()}
+              </Text>
+              {holidayName ? (
+                <Text style={[styles.holidayMiniLabel, selected && styles.holidayMiniLabelSelected]}>FER</Text>
+              ) : hasEvent ? (
+                <View style={[styles.dayDot, { backgroundColor: markerColor }]} />
+              ) : (
+                <View style={styles.dayDotSpacer} />
+              )}
             </Pressable>
           );
         })}
+      </View>
+      <View style={styles.calendarLegendRow}>
+        <View style={styles.legendItem}><View style={styles.legendHolidayBox} /><Text style={styles.legendText}>Feriado nacional</Text></View>
+        <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: markerColor }]} /><Text style={styles.legendText}>Evento</Text></View>
       </View>
     </View>
   );
@@ -998,6 +1048,13 @@ function SettingsTab({ profile, updateProfile }) {
       <SectionTitle title="Configurações" subtitle="Personalize o aplicativo para sua rotina." />
       <View style={styles.card}>
         <InputField label="Nome do professor" value={profile.teacherName} onChangeText={(text) => updateProfile({ teacherName: text })} placeholder="Ex.: Prof. Matheus" />
+        <InputField
+          label="Fim do ano letivo"
+          value={profile.schoolYearEnd || ''}
+          onChangeText={(text) => updateProfile({ schoolYearEnd: text })}
+          placeholder="AAAA-MM-DD (ex.: 2026-12-20)"
+        />
+        <Text style={styles.helperText}>Eventos, aulas recorrentes, compromissos e avaliações só serão exibidos e cadastrados até essa data. Deixe em branco para não limitar.</Text>
         <SwitchRow label="Modo compacto" value={profile.compactMode} onValueChange={(value) => updateProfile({ compactMode: value })} />
         <SwitchRow label="Notificações locais (preparação)" value={profile.notifications} onValueChange={(value) => updateProfile({ notifications: value })} />
       </View>
@@ -1225,12 +1282,22 @@ const styles = StyleSheet.create({
   eventDate: { color: palette.text, fontSize: 12, marginTop: 8 },
   eventDescription: { color: palette.muted, fontSize: 12, marginTop: 8, lineHeight: 18 },
 
+  calendarLegendRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 18, marginTop: 10 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendHolidayBox: { width: 10, height: 10, borderRadius: 3, backgroundColor: '#FFE7E7', borderWidth: 1, borderColor: '#F2B6B6' },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { color: palette.muted, fontSize: 11, fontWeight: '700' },
   eventHint: { color: palette.muted, fontSize: 11, marginTop: 8, fontWeight: '700' },
   detailBox: { backgroundColor: palette.bgSoft, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: palette.border, marginTop: 8, marginBottom: 8 },
   detailText: { color: palette.text, fontSize: 13, lineHeight: 20 },
   dangerButton: { backgroundColor: palette.danger, paddingVertical: 15, borderRadius: 18, alignItems: 'center', marginTop: 12 },
   dangerButtonText: { color: palette.white, fontSize: 15, fontWeight: '900' },
-  dayCellHoliday: { backgroundColor: '#FFF4E0' },
+  dayCellHoliday: { backgroundColor: '#FFE7E7', borderWidth: 1, borderColor: '#F2B6B6' },
+  dayCellHolidaySelected: { backgroundColor: palette.danger, borderColor: palette.danger },
+  dayCellHolidayText: { color: palette.danger },
+  dayCellHolidayTextSelected: { color: palette.white },
+  holidayMiniLabel: { color: palette.danger, fontSize: 8, fontWeight: '900', marginTop: 2 },
+  holidayMiniLabelSelected: { color: palette.white },
   holidayDot: { width: 6, height: 6, borderRadius: 3, marginTop: 4, backgroundColor: palette.danger },
   tabsWrap: { position: 'absolute', left: 10, right: 10, bottom: 10, backgroundColor: palette.white, borderRadius: 24, flexDirection: 'row', padding: 7, borderWidth: 1, borderColor: palette.border, justifyContent: 'space-between', elevation: 10 },
   tabItem: { flex: 1, minHeight: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingHorizontal: 2 },
