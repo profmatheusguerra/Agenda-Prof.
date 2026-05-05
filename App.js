@@ -301,6 +301,7 @@ function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [nowTick, setNowTick] = useState(Date.now());
   const [editingItem, setEditingItem] = useState(null);
   const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
   const [calendarTargetField, setCalendarTargetField] = useState('date');
@@ -358,6 +359,11 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch((error) => {
       console.log('Erro ao salvar dados', error);
     });
@@ -371,6 +377,8 @@ function App() {
 
     for (let cursor = new Date(start); cursor <= end; cursor = addDays(cursor, 1)) {
       const dateKey = toDateKey(cursor);
+      if (isNationalHoliday(dateKey)) continue;
+
       data.lessons.forEach((lesson) => {
         if (isLessonOnDate(lesson, dateKey)) {
           const school = findById(data.schools, lesson.schoolId);
@@ -435,10 +443,10 @@ function App() {
     });
   }, [data, viewMonth]);
 
-  const todaysEvents = enrichedEvents.filter((event) => event.date === todayKey() && shouldShowInTodayWeek(event));
+  const todaysEvents = enrichedEvents.filter((event) => event.date === todayKey() && nowTick && shouldShowInTodayWeek(event));
   const weekStart = startOfWeek(new Date());
   const weekEnd = endOfWeek(new Date());
-  const weekEvents = enrichedEvents.filter((event) => isWithinRange(parseDateKey(event.date), weekStart, weekEnd) && shouldShowInTodayWeek(event));
+  const weekEvents = enrichedEvents.filter((event) => isWithinRange(parseDateKey(event.date), weekStart, weekEnd) && nowTick && shouldShowInTodayWeek(event));
   const selectedDayEvents = enrichedEvents.filter((event) => event.date === selectedDate);
   const monthCells = buildMonthCells(viewMonth);
 
@@ -453,6 +461,7 @@ function App() {
   const examCountByDay = useMemo(() => {
     const counts = {};
     data.exams.forEach((exam) => {
+      if (isNationalHoliday(exam.date)) return;
       counts[exam.date] = (counts[exam.date] || 0) + 1;
     });
     return counts;
@@ -887,28 +896,36 @@ function WeekTab({ events, weekStart, weekEnd, weeklyLessonCount, onEventPress }
 }
 
 function CalendarTab({ monthCells, selectedDate, setSelectedDate, selectedDayEvents, eventCountByDay, viewMonth, setViewMonth, onEventPress }) {
+  const holidayName = isNationalHoliday(selectedDate);
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
       <MonthCalendar monthCells={monthCells} selectedDate={selectedDate} setSelectedDate={setSelectedDate} countByDay={eventCountByDay} viewMonth={viewMonth} setViewMonth={setViewMonth} />
       <SectionTitle title={`Agenda de ${shortDate(selectedDate)}`} />
-      {selectedDayEvents.length === 0 ? <EmptyState text="Nenhuma tarefa neste dia." /> : selectedDayEvents.map((event) => <EventCard key={event.id} event={event} onPress={onEventPress} />)}
+      {holidayName ? (
+        <HolidayState name={holidayName} />
+      ) : selectedDayEvents.length === 0 ? (
+        <EmptyState text="Nenhuma tarefa neste dia." />
+      ) : (
+        selectedDayEvents.map((event) => <EventCard key={event.id} event={event} onPress={onEventPress} />)
+      )}
     </ScrollView>
   );
 }
 
 function ExamsTab({ exams, data, monthCells, selectedDate, setSelectedDate, examCountByDay, viewMonth, setViewMonth, onEventPress }) {
-  const selectedExams = exams.filter((exam) => exam.date === selectedDate);
+  const holidayName = isNationalHoliday(selectedDate);
+  const selectedExams = holidayName ? [] : exams.filter((exam) => exam.date === selectedDate);
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
       <SectionTitle title="Calendário de Avaliações" subtitle="Acompanhe provas e revisões programadas." />
       <MonthCalendar monthCells={monthCells} selectedDate={selectedDate} setSelectedDate={setSelectedDate} countByDay={examCountByDay} viewMonth={viewMonth} setViewMonth={setViewMonth} markerColor={palette.danger} />
       <SectionTitle title={`Avaliações de ${shortDate(selectedDate)}`} />
-      {selectedExams.length === 0 ? <EmptyState text="Nenhuma avaliação neste dia." /> : selectedExams.map((exam) => {
+      {holidayName ? <HolidayState name={holidayName} /> : selectedExams.length === 0 ? <EmptyState text="Nenhuma avaliação neste dia." /> : selectedExams.map((exam) => {
         const school = findById(data.schools, exam.schoolId);
         const classItem = findById(data.classes, exam.classId);
         const subject = findById(data.subjects, exam.subjectId);
         return (
-          <View key={exam.id} style={styles.eventCard}>
+          <Pressable key={exam.id} style={styles.eventCard} onPress={() => onEventPress?.({ id: `exam-${exam.id}`, originalId: exam.id, eventType: 'avaliação', title: exam.title || `Avaliação de ${subject?.name || 'disciplina'}`, subtitle: `${classItem?.name || 'Turma'} • ${school?.name || 'Escola'}`, date: exam.date, sortTime: exam.time || '00:00', timeLabel: exam.time || '--:--', color: palette.danger, description: exam.attachmentName ? `Prova/anexo: ${exam.attachmentName}` : '' })}>
             <View style={[styles.eventColor, { backgroundColor: palette.danger }]} />
             <View style={styles.eventContent}>
               <View style={styles.eventTopRow}>
@@ -919,7 +936,7 @@ function ExamsTab({ exams, data, monthCells, selectedDate, setSelectedDate, exam
               <Text style={styles.eventDate}>{subject?.name || 'Disciplina'}</Text>
               {exam.attachmentName ? <Text style={styles.eventDescription}>Prova/anexo: {exam.attachmentName}</Text> : null}
             </View>
-          </View>
+          </Pressable>
         );
       })}
     </ScrollView>
@@ -1267,6 +1284,10 @@ const styles = StyleSheet.create({
   dayDotSpacer: { width: 6, height: 6, marginTop: 4 },
   emptyCard: { backgroundColor: palette.card, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: palette.border },
   emptyText: { color: palette.muted, fontSize: 14 },
+  holidayCard: { backgroundColor: '#FFF5F5', borderRadius: 22, padding: 18, borderWidth: 1, borderColor: '#F7CACA', alignItems: 'center', marginBottom: 12 },
+  holidayIcon: { fontSize: 32, marginBottom: 6 },
+  holidayTitle: { color: palette.danger, fontSize: 18, fontWeight: '800', marginBottom: 4 },
+  holidayText: { color: palette.text, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   managementGrid: { gap: 12 },
   managementCard: { backgroundColor: palette.card, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: palette.border },
   managementTitle: { color: palette.text, fontSize: 16, fontWeight: '800' },
