@@ -3,6 +3,7 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -14,6 +15,15 @@ import {
   View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const STORAGE_KEY = 'agenda-prof-v2-data';
 
@@ -36,6 +46,12 @@ const palette = {
 const SCHOOL_COLORS = ['#345DB8', '#27B7D7', '#F5A623', '#34C38F', '#A855F7', '#EF4444', '#F97316'];
 const COMMITMENT_TYPES = ['Envio de avaliações', 'Reunião pedagógica', 'Outros'];
 const RECURRENCE_OPTIONS = ['Não repetir', 'Diariamente', 'Semanalmente', 'Anualmente'];
+const REMINDER_OPTIONS = [
+  { label: '10 minutos antes', value: '10min', minutes: 10 },
+  { label: '1 dia antes', value: '1day', minutes: 1440 },
+  { label: '1 semana antes', value: '1week', minutes: 10080 },
+  { label: '1 mês antes', value: '1month', minutes: 43200 },
+];
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const WEEKDAY_OPTIONS = [
   { label: 'Segunda-feira', value: 1 },
@@ -161,6 +177,122 @@ function findById(arr, id) {
   return arr.find((item) => item.id === id);
 }
 
+function getReminderMinutes(value, fallback = 10) {
+  return REMINDER_OPTIONS.find((item) => item.value === value)?.minutes || fallback;
+}
+
+function getEasterDate(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day, 12, 0, 0);
+}
+
+function getNationalHolidayMap(year) {
+  const easter = getEasterDate(year);
+  const movable = [
+    { key: toDateKey(addDays(easter, -48)), name: 'Carnaval' },
+    { key: toDateKey(addDays(easter, -47)), name: 'Carnaval' },
+    { key: toDateKey(addDays(easter, -2)), name: 'Sexta-feira Santa' },
+    { key: toDateKey(addDays(easter, 60)), name: 'Corpus Christi' },
+  ];
+  const fixed = [
+    ['01-01', 'Confraternização Universal'],
+    ['04-21', 'Tiradentes'],
+    ['05-01', 'Dia do Trabalhador'],
+    ['09-07', 'Independência do Brasil'],
+    ['10-12', 'Nossa Senhora Aparecida'],
+    ['11-02', 'Finados'],
+    ['11-15', 'Proclamação da República'],
+    ['11-20', 'Consciência Negra'],
+    ['12-25', 'Natal'],
+  ].map(([md, name]) => ({ key: `${year}-${md}`, name }));
+  return Object.fromEntries([...fixed, ...movable].map((item) => [item.key, item.name]));
+}
+
+function isNationalHoliday(dateKey) {
+  const year = parseDateKey(dateKey).getFullYear();
+  return getNationalHolidayMap(year)[dateKey] || null;
+}
+
+function eventEndDate(event) {
+  const time = event.timeLabel?.includes(' - ') ? event.timeLabel.split(' - ')[1] : event.sortTime || '00:00';
+  const [hours = 0, minutes = 0] = String(time || '00:00').split(':').map(Number);
+  const date = parseDateKey(event.date);
+  date.setHours(hours || 0, minutes || 0, 0, 0);
+  return date;
+}
+
+function shouldShowInTodayWeek(event) {
+  const limit = eventEndDate(event);
+  limit.setMinutes(limit.getMinutes() + 30);
+  return limit > new Date();
+}
+
+async function ensureNotificationPermission() {
+  try {
+    const current = await Notifications.getPermissionsAsync();
+    let status = current.status;
+    if (status !== 'granted') {
+      const request = await Notifications.requestPermissionsAsync();
+      status = request.status;
+    }
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('agenda-prof', {
+        name: 'Agenda Prof',
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    }
+    return status === 'granted';
+  } catch (error) {
+    console.log('Erro ao configurar notificações', error);
+    return false;
+  }
+}
+
+async function scheduleLocalReminder({ title, body, dateKey, time, minutesBefore = 10 }) {
+  try {
+    const allowed = await ensureNotificationPermission();
+    if (!allowed || !dateKey || !time) return null;
+    const [hours = 0, minutes = 0] = String(time).split(':').map(Number);
+    const triggerDate = parseDateKey(dateKey);
+    triggerDate.setHours(hours || 0, minutes || 0, 0, 0);
+    triggerDate.setMinutes(triggerDate.getMinutes() - minutesBefore);
+    if (triggerDate <= new Date()) return null;
+    return Notifications.scheduleNotificationAsync({
+      content: { title, body },
+      trigger: triggerDate,
+    });
+  } catch (error) {
+    console.log('Erro ao agendar lembrete', error);
+    return null;
+  }
+}
+
+function getNextLessonDate(lesson) {
+  if ((lesson.lessonType || 'recurring') === 'single') return lesson.date;
+  const start = parseDateKey(lesson.startDate || todayKey());
+  const now = new Date();
+  let cursor = start > now ? start : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+  for (let i = 0; i < 21; i += 1) {
+    const key = toDateKey(cursor);
+    if (isLessonOnDate(lesson, key)) return key;
+    cursor = addDays(cursor, 1);
+  }
+  return lesson.startDate || todayKey();
+}
+
 function App() {
   const [data, setData] = useState(initialData);
   const [activeTab, setActiveTab] = useState('Hoje');
@@ -168,6 +300,8 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState(null);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
   const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
   const [calendarTargetField, setCalendarTargetField] = useState('date');
   const [managementModal, setManagementModal] = useState(null);
@@ -182,6 +316,7 @@ function App() {
     date: todayKey(),
     startTime: '07:00',
     endTime: '07:50',
+    reminder: '10min',
   });
   const [commitmentForm, setCommitmentForm] = useState({
     type: COMMITMENT_TYPES[0],
@@ -191,6 +326,7 @@ function App() {
     date: todayKey(),
     time: '08:00',
     recurrence: 'Não repetir',
+    reminder: '10min',
   });
   const [examForm, setExamForm] = useState({
     schoolId: '',
@@ -200,6 +336,7 @@ function App() {
     date: todayKey(),
     time: '08:00',
     attachmentName: '',
+    reminder: '1day',
   });
   const [schoolForm, setSchoolForm] = useState({ name: '', color: SCHOOL_COLORS[0] });
   const [classForm, setClassForm] = useState({ name: '' });
@@ -214,6 +351,10 @@ function App() {
         console.log('Erro ao carregar dados', error);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    ensureNotificationPermission();
   }, []);
 
   useEffect(() => {
@@ -294,10 +435,10 @@ function App() {
     });
   }, [data, viewMonth]);
 
-  const todaysEvents = enrichedEvents.filter((event) => event.date === todayKey());
+  const todaysEvents = enrichedEvents.filter((event) => event.date === todayKey() && shouldShowInTodayWeek(event));
   const weekStart = startOfWeek(new Date());
   const weekEnd = endOfWeek(new Date());
-  const weekEvents = enrichedEvents.filter((event) => isWithinRange(parseDateKey(event.date), weekStart, weekEnd));
+  const weekEvents = enrichedEvents.filter((event) => isWithinRange(parseDateKey(event.date), weekStart, weekEnd) && shouldShowInTodayWeek(event));
   const selectedDayEvents = enrichedEvents.filter((event) => event.date === selectedDate);
   const monthCells = buildMonthCells(viewMonth);
 
@@ -328,6 +469,12 @@ function App() {
 
   const weeklyLessonCount = data.lessons.filter((lesson) => (lesson.lessonType || 'recurring') === 'recurring').length;
 
+  const openCreateMenu = () => {
+    setEditingItem(null);
+    setModalMode(null);
+    setModalOpen(true);
+  };
+
   const handleLessonStartTime = (text) => {
     setLessonForm((prev) => ({ ...prev, startTime: text, endTime: addMinutesToTime(text, 50) || prev.endTime }));
   };
@@ -357,12 +504,27 @@ function App() {
     if (!lessonForm.schoolId || !lessonForm.classId || !lessonForm.subjectId) {
       return Alert.alert('Campos obrigatórios', 'Selecione escola, turma e disciplina.');
     }
+    const lessonDate = lessonForm.lessonType === 'single' ? lessonForm.date : lessonForm.startDate;
+    const holidayName = isNationalHoliday(lessonDate);
+    if (holidayName) return Alert.alert('Feriado nacional', `Não é possível cadastrar aula em ${shortDate(lessonDate)} (${holidayName}).`);
     const lessonToSave = {
-      id: uid(),
+      id: editingItem?.type === 'lesson' ? editingItem.id : uid(),
       ...lessonForm,
       weekday: lessonForm.lessonType === 'single' ? parseDateKey(lessonForm.date).getDay() : lessonForm.weekday,
     };
-    setData((prev) => ({ ...prev, lessons: [...prev.lessons, lessonToSave] }));
+    setData((prev) => ({
+      ...prev,
+      lessons: editingItem?.type === 'lesson'
+        ? prev.lessons.map((item) => item.id === editingItem.id ? lessonToSave : item)
+        : [...prev.lessons, lessonToSave],
+    }));
+    scheduleLocalReminder({
+      title: `Aula: ${findById(data.subjects, lessonToSave.subjectId)?.name || 'Aula'}`,
+      body: 'Sua aula começa em 10 minutos.',
+      dateKey: getNextLessonDate(lessonToSave),
+      time: lessonToSave.startTime,
+      minutesBefore: 10,
+    });
     setLessonForm({
       lessonType: 'recurring',
       schoolId: '',
@@ -373,18 +535,33 @@ function App() {
       date: todayKey(),
       startTime: '07:00',
       endTime: '07:50',
+      reminder: '10min',
     });
+    setEditingItem(null);
     setModalMode(null);
     setModalOpen(false);
   };
 
   const saveCommitment = () => {
     if (!commitmentForm.title.trim()) return Alert.alert('Campo obrigatório', 'Informe um título para o compromisso.');
+    const holidayName = isNationalHoliday(commitmentForm.date);
+    if (holidayName) return Alert.alert('Feriado nacional', `Não é possível cadastrar compromisso em ${shortDate(commitmentForm.date)} (${holidayName}).`);
+    const commitmentToSave = { id: editingItem?.type === 'commitment' ? editingItem.id : uid(), ...commitmentForm, title: commitmentForm.title.trim(), description: commitmentForm.description.trim() };
     setData((prev) => ({
       ...prev,
-      commitments: [...prev.commitments, { id: uid(), ...commitmentForm, title: commitmentForm.title.trim(), description: commitmentForm.description.trim() }],
+      commitments: editingItem?.type === 'commitment'
+        ? prev.commitments.map((item) => item.id === editingItem.id ? commitmentToSave : item)
+        : [...prev.commitments, commitmentToSave],
     }));
-    setCommitmentForm({ type: COMMITMENT_TYPES[0], title: '', description: '', schoolId: '', date: todayKey(), time: '08:00', recurrence: 'Não repetir' });
+    scheduleLocalReminder({
+      title: commitmentToSave.title || commitmentToSave.type,
+      body: `Lembrete: ${commitmentToSave.type}`,
+      dateKey: commitmentToSave.date,
+      time: commitmentToSave.time,
+      minutesBefore: getReminderMinutes(commitmentToSave.reminder, 10),
+    });
+    setCommitmentForm({ type: COMMITMENT_TYPES[0], title: '', description: '', schoolId: '', date: todayKey(), time: '08:00', recurrence: 'Não repetir', reminder: '10min' });
+    setEditingItem(null);
     setModalMode(null);
     setModalOpen(false);
   };
@@ -423,19 +600,82 @@ function App() {
     if (!examForm.schoolId || !examForm.classId || !examForm.subjectId) {
       return Alert.alert('Campos obrigatórios', 'Selecione escola, turma e disciplina para a avaliação.');
     }
+    const holidayName = isNationalHoliday(examForm.date);
+    if (holidayName) return Alert.alert('Feriado nacional', `Não é possível cadastrar avaliação em ${shortDate(examForm.date)} (${holidayName}).`);
     const subject = findById(data.subjects, examForm.subjectId);
     const exam = {
-      id: uid(),
+      id: editingItem?.type === 'exam' ? editingItem.id : uid(),
       ...examForm,
       title: examForm.title.trim() || `Avaliação de ${subject?.name || 'disciplina'}`,
       attachmentName: examForm.attachmentName.trim(),
     };
-    const reminders = previousLessonReminderCommitments(exam);
-    setData((prev) => ({ ...prev, exams: [...prev.exams, exam], commitments: [...prev.commitments, ...reminders] }));
-    setExamForm({ schoolId: '', classId: '', subjectId: '', title: '', date: todayKey(), time: '08:00', attachmentName: '' });
+    const reminders = editingItem?.type === 'exam' ? [] : previousLessonReminderCommitments(exam);
+    setData((prev) => ({
+      ...prev,
+      exams: editingItem?.type === 'exam' ? prev.exams.map((item) => item.id === editingItem.id ? exam : item) : [...prev.exams, exam],
+      commitments: [...prev.commitments, ...reminders],
+    }));
+    scheduleLocalReminder({
+      title: exam.title,
+      body: 'Avaliação programada. Prepare a turma!',
+      dateKey: exam.date,
+      time: exam.time,
+      minutesBefore: getReminderMinutes(exam.reminder, 1440),
+    });
+    setExamForm({ schoolId: '', classId: '', subjectId: '', title: '', date: todayKey(), time: '08:00', attachmentName: '', reminder: '1day' });
+    setEditingItem(null);
     setModalMode(null);
     setModalOpen(false);
-    Alert.alert('Avaliação salva', reminders.length ? `Também criei ${reminders.length} lembrete(s) de revisão nas aulas anteriores.` : 'Não encontrei aulas anteriores cadastradas para criar lembretes automáticos.');
+    if (!editingItem) Alert.alert('Avaliação salva', reminders.length ? `Também criei ${reminders.length} lembrete(s) de revisão nas aulas anteriores.` : 'Não encontrei aulas anteriores cadastradas para criar lembretes automáticos.');
+  };
+
+
+  const openEventDetails = (event) => setSelectedEvent(event);
+
+  const closeEventDetails = () => setSelectedEvent(null);
+
+  const startEditEvent = (event) => {
+    if (!event) return;
+    if (event.eventType === 'compromisso') {
+      const item = data.commitments.find((commitment) => commitment.id === event.originalId);
+      if (!item) return;
+      setCommitmentForm({ type: COMMITMENT_TYPES[0], title: '', description: '', schoolId: '', date: todayKey(), time: '08:00', recurrence: 'Não repetir', reminder: '10min', ...item });
+      setEditingItem({ type: 'commitment', id: item.id });
+      setModalMode('commitment');
+    } else if (event.eventType === 'avaliação') {
+      const item = data.exams.find((exam) => exam.id === event.originalId);
+      if (!item) return;
+      setExamForm({ schoolId: '', classId: '', subjectId: '', title: '', date: todayKey(), time: '08:00', attachmentName: '', reminder: '1day', ...item });
+      setEditingItem({ type: 'exam', id: item.id });
+      setModalMode('exam');
+    } else {
+      const item = data.lessons.find((lesson) => lesson.id === event.originalId);
+      if (!item) return;
+      setLessonForm({ lessonType: 'recurring', schoolId: '', classId: '', subjectId: '', weekday: 1, startDate: todayKey(), date: todayKey(), startTime: '07:00', endTime: '07:50', reminder: '10min', ...item });
+      setEditingItem({ type: 'lesson', id: item.id });
+      setModalMode('lesson');
+    }
+    setSelectedEvent(null);
+    setModalOpen(true);
+  };
+
+  const deleteEvent = (event) => {
+    if (!event) return;
+    Alert.alert('Excluir evento', 'Deseja realmente excluir este evento?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: () => {
+          setData((prev) => {
+            if (event.eventType === 'compromisso') return { ...prev, commitments: prev.commitments.filter((item) => item.id !== event.originalId) };
+            if (event.eventType === 'avaliação') return { ...prev, exams: prev.exams.filter((item) => item.id !== event.originalId) };
+            return { ...prev, lessons: prev.lessons.filter((item) => item.id !== event.originalId) };
+          });
+          setSelectedEvent(null);
+        },
+      },
+    ]);
   };
 
   const updateProfile = (patch) => setData((prev) => ({ ...prev, profile: { ...prev.profile, ...patch } }));
@@ -446,12 +686,21 @@ function App() {
   };
 
   const handleCalendarSelect = (dateKey) => {
+    if (calendarTargetField === 'viewDate') setSelectedDate(dateKey);
     if (calendarTargetField === 'commitmentDate') setCommitmentForm((prev) => ({ ...prev, date: dateKey }));
     if (calendarTargetField === 'lessonStartDate') setLessonForm((prev) => ({ ...prev, startDate: dateKey }));
     if (calendarTargetField === 'lessonDate') setLessonForm((prev) => ({ ...prev, date: dateKey }));
     if (calendarTargetField === 'examDate') setExamForm((prev) => ({ ...prev, date: dateKey }));
     setCalendarPickerOpen(false);
   };
+
+
+  const calendarPickerValue =
+    calendarTargetField === 'commitmentDate' ? commitmentForm.date :
+    calendarTargetField === 'lessonStartDate' ? lessonForm.startDate :
+    calendarTargetField === 'lessonDate' ? lessonForm.date :
+    calendarTargetField === 'examDate' ? examForm.date :
+    selectedDate;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -460,8 +709,8 @@ function App() {
         <Header teacherName={data.profile.teacherName} />
 
         <View style={styles.body}>
-          {activeTab === 'Hoje' && <TodayTab events={todaysEvents} counts={counts} />}
-          {activeTab === 'Semana' && <WeekTab events={weekEvents} weekStart={weekStart} weekEnd={weekEnd} weeklyLessonCount={weeklyLessonCount} />}
+          {activeTab === 'Hoje' && <TodayTab events={todaysEvents} counts={counts} onEventPress={openEventDetails} />}
+          {activeTab === 'Semana' && <WeekTab events={weekEvents} weekStart={weekStart} weekEnd={weekEnd} weeklyLessonCount={weeklyLessonCount} onEventPress={openEventDetails} />}
           {activeTab === 'Calendário' && (
             <CalendarTab
               monthCells={monthCells}
@@ -471,6 +720,7 @@ function App() {
               eventCountByDay={eventCountByDay}
               viewMonth={viewMonth}
               setViewMonth={setViewMonth}
+              onEventPress={openEventDetails}
             />
           )}
           {activeTab === 'Gestão' && <ManagementTab data={data} counts={counts} openManage={setManagementModal} />}
@@ -484,6 +734,7 @@ function App() {
               examCountByDay={examCountByDay}
               viewMonth={viewMonth}
               setViewMonth={setViewMonth}
+              onEventPress={openEventDetails}
             />
           )}
           {activeTab === 'Configurações' && <SettingsTab profile={data.profile} updateProfile={updateProfile} />}
@@ -491,7 +742,7 @@ function App() {
 
         <BottomTabs activeTab={activeTab} setActiveTab={setActiveTab} />
 
-        <Pressable style={styles.fab} onPress={() => setModalOpen(true)}>
+        <Pressable style={styles.fab} onPress={openCreateMenu}>
           <Text style={styles.fabIcon}>＋</Text>
         </Pressable>
       </View>
@@ -551,6 +802,7 @@ function App() {
                 <View style={styles.rowGap}>
                   <InputField label="Horário" value={commitmentForm.time} onChangeText={(text) => setCommitmentForm((prev) => ({ ...prev, time: text }))} placeholder="14:00" />
                   <SelectField label="Repetição" value={commitmentForm.recurrence} options={RECURRENCE_OPTIONS.map((item) => ({ label: item, value: item }))} onChange={(value) => setCommitmentForm((prev) => ({ ...prev, recurrence: value }))} />
+                  <SelectField label="Lembrete" value={commitmentForm.reminder} options={REMINDER_OPTIONS.map((item) => ({ label: item.label, value: item.value }))} onChange={(value) => setCommitmentForm((prev) => ({ ...prev, reminder: value }))} />
                 </View>
                 <PrimaryButton title="Salvar compromisso" onPress={saveCommitment} />
                 <SecondaryButton title="Voltar" onPress={() => setModalMode(null)} />
@@ -568,6 +820,7 @@ function App() {
                 <DateButton label="Data da avaliação" value={examForm.date} onPress={() => openCalendar('examDate')} />
                 <InputField label="Horário" value={examForm.time} onChangeText={(text) => setExamForm((prev) => ({ ...prev, time: text }))} placeholder="08:00" />
                 <InputField label="Anexo da prova (opcional)" value={examForm.attachmentName} onChangeText={(text) => setExamForm((prev) => ({ ...prev, attachmentName: text }))} placeholder="Nome do arquivo ou observação" />
+                <SelectField label="Lembrete" value={examForm.reminder} options={REMINDER_OPTIONS.map((item) => ({ label: item.label, value: item.value }))} onChange={(value) => setExamForm((prev) => ({ ...prev, reminder: value }))} />
                 <Text style={styles.helperText}>Nesta versão, o anexo fica registrado como nome/observação. O seletor real de arquivos será feito depois com biblioteca própria.</Text>
                 <PrimaryButton title="Salvar avaliação" onPress={saveExam} />
                 <SecondaryButton title="Voltar" onPress={() => setModalMode(null)} />
@@ -577,7 +830,9 @@ function App() {
         </View>
       </Modal>
 
-      <CalendarPicker visible={calendarPickerOpen} value={selectedDate} onClose={() => setCalendarPickerOpen(false)} onSelect={handleCalendarSelect} />
+      <CalendarPicker visible={calendarPickerOpen} value={calendarPickerValue} onClose={() => setCalendarPickerOpen(false)} onSelect={handleCalendarSelect} />
+
+      <EventDetailModal event={selectedEvent} onClose={closeEventDetails} onEdit={startEditEvent} onDelete={deleteEvent} />
 
       <ManagementModal type={managementModal} onClose={() => setManagementModal(null)} schoolForm={schoolForm} setSchoolForm={setSchoolForm} classForm={classForm} setClassForm={setClassForm} subjectForm={subjectForm} setSubjectForm={setSubjectForm} saveSchool={saveSchool} saveClass={saveClass} saveSubject={saveSubject} />
     </SafeAreaView>
@@ -601,7 +856,7 @@ function Header({ teacherName }) {
   );
 }
 
-function TodayTab({ events, counts }) {
+function TodayTab({ events, counts, onEventPress }) {
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
       <View style={styles.heroCard}>
@@ -614,16 +869,16 @@ function TodayTab({ events, counts }) {
         <StatCard label="Avaliações" value={counts.exams} />
       </View>
       <SectionTitle title="Agenda do dia" />
-      {events.length === 0 ? <EmptyState text="Nenhum item programado para hoje." /> : events.map((event) => <EventCard key={event.id} event={event} />)}
+      {events.length === 0 ? <EmptyState text="Nenhum item programado para hoje." /> : events.map((event) => <EventCard key={event.id} event={event} onPress={onEventPress} />)}
     </ScrollView>
   );
 }
 
-function WeekTab({ events, weekStart, weekEnd, weeklyLessonCount }) {
+function WeekTab({ events, weekStart, weekEnd, weeklyLessonCount, onEventPress }) {
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
       <SectionTitle title="Tarefas da Semana" subtitle={`${weekStart.toLocaleDateString('pt-BR')} até ${weekEnd.toLocaleDateString('pt-BR')}`} />
-      {events.length === 0 ? <EmptyState text="Nenhuma tarefa programada nesta semana." /> : events.map((event) => <EventCard key={event.id} event={event} />)}
+      {events.length === 0 ? <EmptyState text="Nenhuma tarefa programada nesta semana." /> : events.map((event) => <EventCard key={event.id} event={event} onPress={onEventPress} />)}
       <View style={styles.weekTotalCard}>
         <Text style={styles.weekTotalText}>Você possui {weeklyLessonCount} aulas semanais 😅</Text>
       </View>
@@ -631,17 +886,17 @@ function WeekTab({ events, weekStart, weekEnd, weeklyLessonCount }) {
   );
 }
 
-function CalendarTab({ monthCells, selectedDate, setSelectedDate, selectedDayEvents, eventCountByDay, viewMonth, setViewMonth }) {
+function CalendarTab({ monthCells, selectedDate, setSelectedDate, selectedDayEvents, eventCountByDay, viewMonth, setViewMonth, onEventPress }) {
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
       <MonthCalendar monthCells={monthCells} selectedDate={selectedDate} setSelectedDate={setSelectedDate} countByDay={eventCountByDay} viewMonth={viewMonth} setViewMonth={setViewMonth} />
       <SectionTitle title={`Agenda de ${shortDate(selectedDate)}`} />
-      {selectedDayEvents.length === 0 ? <EmptyState text="Nenhuma tarefa neste dia." /> : selectedDayEvents.map((event) => <EventCard key={event.id} event={event} />)}
+      {selectedDayEvents.length === 0 ? <EmptyState text="Nenhuma tarefa neste dia." /> : selectedDayEvents.map((event) => <EventCard key={event.id} event={event} onPress={onEventPress} />)}
     </ScrollView>
   );
 }
 
-function ExamsTab({ exams, data, monthCells, selectedDate, setSelectedDate, examCountByDay, viewMonth, setViewMonth }) {
+function ExamsTab({ exams, data, monthCells, selectedDate, setSelectedDate, examCountByDay, viewMonth, setViewMonth, onEventPress }) {
   const selectedExams = exams.filter((exam) => exam.date === selectedDate);
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -690,10 +945,11 @@ function MonthCalendar({ monthCells, selectedDate, setSelectedDate, countByDay, 
         {monthCells.map((cell) => {
           const selected = cell.key === selectedDate;
           const hasEvent = countByDay[cell.key] > 0;
+          const holidayName = isNationalHoliday(cell.key);
           return (
-            <Pressable key={cell.key} onPress={() => setSelectedDate(cell.key)} style={[styles.dayCell, selected && styles.dayCellSelected, !cell.inMonth && styles.dayCellMuted]}>
+            <Pressable key={cell.key} onPress={() => setSelectedDate(cell.key)} style={[styles.dayCell, holidayName && styles.dayCellHoliday, selected && styles.dayCellSelected, !cell.inMonth && styles.dayCellMuted]}>
               <Text style={[styles.dayCellText, selected && styles.dayCellTextSelected]}>{parseDateKey(cell.key).getDate()}</Text>
-              {hasEvent ? <View style={[styles.dayDot, { backgroundColor: markerColor }]} /> : <View style={styles.dayDotSpacer} />}
+              {holidayName ? <View style={styles.holidayDot} /> : hasEvent ? <View style={[styles.dayDot, { backgroundColor: markerColor }]} /> : <View style={styles.dayDotSpacer} />} 
             </Pressable>
           );
         })}
@@ -732,9 +988,9 @@ function SettingsTab({ profile, updateProfile }) {
   );
 }
 
-function EventCard({ event }) {
+function EventCard({ event, onPress }) {
   return (
-    <View style={styles.eventCard}>
+    <Pressable style={styles.eventCard} onPress={() => onPress?.(event)}>
       <View style={[styles.eventColor, { backgroundColor: event.color }]} />
       <View style={styles.eventContent}>
         <View style={styles.eventTopRow}>
@@ -744,8 +1000,34 @@ function EventCard({ event }) {
         <Text style={styles.eventSubtitle}>{event.subtitle}</Text>
         <Text style={styles.eventDate}>{shortDate(event.date)} • {event.eventType}</Text>
         {event.description ? <Text style={styles.eventDescription}>{event.description}</Text> : null}
+        <Text style={styles.eventHint}>Toque para editar ou excluir</Text>
       </View>
-    </View>
+    </Pressable>
+  );
+}
+
+function EventDetailModal({ event, onClose, onEdit, onDelete }) {
+  if (!event) return null;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>{event.title}</Text>
+          <Text style={styles.modalSubtitle}>{event.subtitle}</Text>
+          <View style={styles.detailBox}>
+            <Text style={styles.detailText}>Tipo: {event.eventType}</Text>
+            <Text style={styles.detailText}>Data: {shortDate(event.date)}</Text>
+            <Text style={styles.detailText}>Horário: {event.timeLabel}</Text>
+            {event.description ? <Text style={styles.detailText}>Obs.: {event.description}</Text> : null}
+          </View>
+          <PrimaryButton title="Editar" onPress={() => onEdit(event)} />
+          <Pressable style={styles.dangerButton} onPress={() => onDelete(event)}>
+            <Text style={styles.dangerButtonText}>Excluir</Text>
+          </Pressable>
+          <SecondaryButton title="Fechar" onPress={onClose} />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -925,6 +1207,14 @@ const styles = StyleSheet.create({
   eventSubtitle: { color: palette.muted, fontSize: 13, marginTop: 6 },
   eventDate: { color: palette.text, fontSize: 12, marginTop: 8 },
   eventDescription: { color: palette.muted, fontSize: 12, marginTop: 8, lineHeight: 18 },
+
+  eventHint: { color: palette.muted, fontSize: 11, marginTop: 8, fontWeight: '700' },
+  detailBox: { backgroundColor: palette.bgSoft, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: palette.border, marginTop: 8, marginBottom: 8 },
+  detailText: { color: palette.text, fontSize: 13, lineHeight: 20 },
+  dangerButton: { backgroundColor: palette.danger, paddingVertical: 15, borderRadius: 18, alignItems: 'center', marginTop: 12 },
+  dangerButtonText: { color: palette.white, fontSize: 15, fontWeight: '900' },
+  dayCellHoliday: { backgroundColor: '#FFF4E0' },
+  holidayDot: { width: 6, height: 6, borderRadius: 3, marginTop: 4, backgroundColor: palette.danger },
   tabsWrap: { position: 'absolute', left: 10, right: 10, bottom: 10, backgroundColor: palette.white, borderRadius: 24, flexDirection: 'row', padding: 7, borderWidth: 1, borderColor: palette.border, justifyContent: 'space-between', elevation: 10 },
   tabItem: { flex: 1, minHeight: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingHorizontal: 2 },
   tabItemActive: { backgroundColor: palette.primarySoft },
